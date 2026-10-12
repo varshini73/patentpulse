@@ -1,7 +1,13 @@
 """PatentPulse ETL: S1 File (xlsx) -> SQLite star schema."""
 import sqlite3
 from pathlib import Path
-import pandas as pd
+
+try:
+    import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "pandas is required. Install the project dependencies first: pip install -r requirements.txt"
+    ) from exc
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data/raw/dataset.xlsx"
