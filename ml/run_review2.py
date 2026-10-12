@@ -27,13 +27,10 @@ from sklearn.metrics import (accuracy_score, average_precision_score, confusion_
                              mean_absolute_error, precision_score, recall_score,
                              root_mean_squared_error, roc_auc_score, silhouette_score)
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, StackingClassifier, VotingClassifier
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict, cross_val_score, train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, OrdinalEncoder, StandardScaler
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.svm import SVC
-from sklearn.calibration import CalibratedClassifierCV
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "warehouse" / "patentpulse.db"
@@ -62,107 +59,63 @@ def warehouse_data() -> pd.DataFrame:
 
 
 def classification(df: pd.DataFrame) -> None:
-    """Evaluate leakage-free individual and ensemble classifiers on one fixed split."""
+    """Select a leakage-free accuracy model using fixed-split training CV only."""
     labelled = df.dropna(subset=["is_highly_cited"]).copy()
-    x = labelled[NUMERIC + CATEGORICAL]
-    y = labelled["is_highly_cited"].astype(int)
-    x_train, x_test, y_train, y_test, id_train, id_test = train_test_split(
+    x, y = labelled[NUMERIC + CATEGORICAL], labelled["is_highly_cited"].astype(int)
+    x_train, x_test, y_train, y_test, _, id_test = train_test_split(
         x, y, labelled["pn"], test_size=0.20, random_state=SEED, stratify=y
     )
-    prep = ColumnTransformer([
+    print(f"[classification] features={NUMERIC + CATEGORICAL}")
+    print(f"[classification] dtypes={x.dtypes.astype(str).to_dict()}; missing={x.isna().sum().to_dict()}")
+    print(f"[classification] labelled={len(labelled):,}; class_distribution={y.value_counts().sort_index().to_dict()}; duplicate_pn={labelled.pn.duplicated().sum()}")
+    print("[classification] paper mapping: VC=ipc_count, FM=family_size*, PG=pages, CL=claims, VTciting=backward_citations, NPL=npl_count, IV=inventors; *family timing uncertain. IPC novelty/combinations, figures, cited-patent IPC diversity/novelty, science and inventor-history indicators are unavailable.")
+
+    standard_prep = ColumnTransformer([
         ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), NUMERIC),
         ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore"))]), CATEGORICAL),
     ])
-    # Two folds keep the nested ensemble experiment lightweight while preserving
-    # stratified, training-only model selection.
-    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
-
-    # Tune unweighted and class-weighted RBF SVMs separately; no test data is used here.
-    svm_searches = {}
-    for suffix, class_weight in [("unweighted", None), ("balanced", "balanced")]:
-        search = GridSearchCV(
-            Pipeline([( "prepare", prep), ("model", SVC(kernel="rbf", class_weight=class_weight, random_state=SEED))]),
-            {"model__C": [0.5, 1.0], "model__gamma": ["scale"]},
-            scoring="f1", cv=cv, n_jobs=1, refit=True,
-        )
-        search.fit(x_train, y_train)
-        svm_searches[suffix] = search
-        print(f"[classification] tuned SVM {suffix}: CV F1={search.best_score_:.3f}", flush=True)
-    best_svm_key = max(svm_searches, key=lambda key: svm_searches[key].best_score_)
-    best_svm = svm_searches[best_svm_key]
-    best_svm_params = best_svm.best_params_
-    svm_weight = "balanced" if best_svm_key == "balanced" else None
-
-    def calibrated_svm() -> CalibratedClassifierCV:
-        return CalibratedClassifierCV(
-            SVC(kernel="rbf", C=best_svm_params["model__C"], gamma=best_svm_params["model__gamma"],
-                class_weight=svm_weight, random_state=SEED), cv=2, method="sigmoid"
-        )
-
-    # These are the existing RF and a simple LR; all probability-enabled base models
-    # are encapsulated in pipelines, including within stacking, to avoid preprocessing leakage.
-    def random_forest() -> RandomForestClassifier:
-        return RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt",
-                                      class_weight="balanced", random_state=SEED, n_jobs=1)
-
-    def logistic() -> LogisticRegression:
-        return LogisticRegression(C=0.25, max_iter=1500, class_weight="balanced", random_state=SEED)
-
-    def feature_pipeline(model):
-        return Pipeline([( "prepare", prep), ("model", model)])
-
-    base_estimators = [feature_pipeline(calibrated_svm()), feature_pipeline(logistic()), feature_pipeline(random_forest())]
-    # Select soft-voting weights from out-of-fold training probabilities once,
-    # avoiding repeated fitting of identical calibrated base estimators.
-    oof_probabilities = np.column_stack([
-        cross_val_predict(estimator, x_train, y_train, cv=cv, method="predict_proba", n_jobs=1)[:, 1]
-        for estimator in base_estimators
+    log_prep = ColumnTransformer([
+        ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), NUMERIC),
+        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
     ])
-    soft_candidates = [(1, 1, 1), (2, 1, 1), (1, 1, 2)]
-    soft_scores = {
-        weights: f1_score(y_train, (np.average(oof_probabilities, axis=1, weights=weights) >= 0.5).astype(int), zero_division=0)
-        for weights in soft_candidates
+    hgb_prep = ColumnTransformer([
+        ("num", SimpleImputer(strategy="median"), NUMERIC),
+        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL),
+    ])
+    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
+    # C and gamma searches are small and fitted only on the training partition.
+    experiments = {
+        "svm_rbf_standard": (Pipeline([( "prepare", standard_prep), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [0.5, 1.0], "model__gamma": ["scale", 0.01]}, "standard scaled numeric + one-hot categorical"),
+        "svm_rbf_log_numeric": (Pipeline([( "prepare", log_prep), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [1.0], "model__gamma": ["scale"]}, "median/log1p/scaled numeric + rare-category grouping"),
+        "svm_rbf_balanced": (Pipeline([( "prepare", standard_prep), ("model", SVC(kernel="rbf", class_weight="balanced", random_state=SEED))]), {"model__C": [0.5], "model__gamma": ["scale"]}, "standard preprocessing; class_weight=balanced"),
+        "hist_gradient_boosting": (Pipeline([( "prepare", hgb_prep), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(NUMERIC) + [True] * len(CATEGORICAL), max_iter=100, max_leaf_nodes=7, random_state=SEED))]), {"model__l2_regularization": [0.0]}, "median numeric + ordinal categorical; native categorical boosting"),
     }
-    selected_weights = max(soft_scores, key=soft_scores.get)
-    soft = VotingClassifier(
-        estimators=[("svm", feature_pipeline(calibrated_svm())), ("lr", feature_pipeline(logistic())), ("rf", feature_pipeline(random_forest()))],
-        voting="soft", weights=selected_weights,
-    )
-    print(f"[classification] selected soft-voting weights={selected_weights}: OOF F1={soft_scores[selected_weights]:.3f}", flush=True)
-    stacking = StackingClassifier(
-        estimators=[("svm", feature_pipeline(calibrated_svm())), ("lr", feature_pipeline(logistic())), ("rf", feature_pipeline(random_forest()))],
-        final_estimator=LogisticRegression(max_iter=1500, class_weight="balanced", random_state=SEED),
-        cv=cv, stack_method="predict_proba", n_jobs=1,
-    )
+    searches = {}
+    for name, (pipeline, grid, _) in experiments.items():
+        search = GridSearchCV(pipeline, grid, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
+        search.fit(x_train, y_train)
+        searches[name] = search
+        print(f"[classification] {name}: CV accuracy={search.best_score_:.3f}; params={search.best_params_}", flush=True)
 
     models = {
-        "majority_baseline": feature_pipeline(DummyClassifier(strategy="most_frequent")),
-        "random_forest": feature_pipeline(random_forest()),
-        "svm_rbf_unweighted": svm_searches["unweighted"].best_estimator_,
-        "svm_rbf_balanced": svm_searches["balanced"].best_estimator_,
-        "soft_voting": soft,
-        "stacking": stacking,
+        "majority_baseline": Pipeline([( "prepare", standard_prep), ("model", DummyClassifier(strategy="most_frequent"))]),
+        "random_forest": Pipeline([( "prepare", standard_prep), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt", class_weight="balanced", random_state=SEED, n_jobs=1))]),
+        **{name: search.best_estimator_ for name, search in searches.items()},
     }
-    cv_scores = {
-        "majority_baseline": 0.0,
-        "random_forest": cross_val_score(models["random_forest"], x_train, y_train, scoring="f1", cv=cv, n_jobs=1).mean(),
-        "svm_rbf_unweighted": svm_searches["unweighted"].best_score_,
-        "svm_rbf_balanced": svm_searches["balanced"].best_score_,
-        "soft_voting": soft_scores[selected_weights],
-        "stacking": cross_val_score(stacking, x_train, y_train, scoring="f1", cv=cv, n_jobs=1).mean(),
-    }
-    print(f"[classification] stacking CV F1={cv_scores['stacking']:.3f}", flush=True)
-    hyperparameters = {
-        "majority_baseline": "most_frequent", "random_forest": "n_estimators=300, min_samples_leaf=2, max_features=sqrt, class_weight=balanced",
-        "svm_rbf_unweighted": str(svm_searches["unweighted"].best_params_),
-        "svm_rbf_balanced": str(svm_searches["balanced"].best_params_),
-        "soft_voting": f"weights={selected_weights}, selected from OOF training probabilities", "stacking": "OOF base probabilities; logistic-regression meta-classifier",
-    }
+    feature_notes = {name: note for name, (_, _, note) in experiments.items()}
+    feature_notes.update({"majority_baseline": "standard scaled numeric + one-hot categorical", "random_forest": "standard scaled numeric + one-hot categorical"})
+    cv_accuracy = {"majority_baseline": np.nan, "random_forest": np.nan}
+    cv_f1 = {"majority_baseline": np.nan, "random_forest": np.nan}
+    for name, model in models.items():
+        if name in searches:
+            cv_accuracy[name] = searches[name].best_score_
+            cv_f1[name] = searches[name].cv_results_["mean_test_f1"][searches[name].best_index_]
+
     metric_rows, fitted = [], {}
     for name, pipeline in models.items():
         pipeline.fit(x_train, y_train)
         pred = pipeline.predict(x_test)
-        probability = pipeline.predict_proba(x_test)[:, 1] if hasattr(pipeline, "predict_proba") else pipeline.decision_function(x_test)
+        score = pipeline.predict_proba(x_test)[:, 1] if hasattr(pipeline, "predict_proba") else pipeline.decision_function(x_test)
         tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
         metric_rows.append({
             "model": name, "train_records": len(x_train), "test_records": len(x_test),
@@ -171,19 +124,20 @@ def classification(df: pd.DataFrame) -> None:
             "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0),
             "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0),
             "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0),
-            "roc_auc": roc_auc_score(y_test, probability), "pr_auc": average_precision_score(y_test, probability),
-            "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_f1_mean": cv_scores[name],
-            "selected_hyperparameters": hyperparameters[name], "paper_reported_svm_accuracy": 0.861,
+            "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score),
+            "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": cv_accuracy[name], "cv_f1_mean": cv_f1[name],
+            "feature_preprocessing": feature_notes[name],
+            "selected_hyperparameters": str(searches[name].best_params_) if name in searches else "fixed current configuration",
+            "paper_reported_svm_accuracy": 0.861,
         })
-        fitted[name] = (pipeline, pred, probability)
-    # The positive-class F1 objective favors detection of highly cited patents;
-    # every choice above, including voting weights, is made on training CV only.
-    selected_name = max(metric_rows[1:], key=lambda row: row["cv_f1_mean"])["model"]
+        fitted[name] = (pipeline, pred, score)
+    # Accuracy is the requested primary target; CV F1 breaks any exact accuracy tie.
+    selected_name = max((row for row in metric_rows if row["model"] in searches), key=lambda row: (row["cv_accuracy_mean"], row["cv_f1_mean"]))["model"]
     for row in metric_rows: row["selected_by_training_cv"] = row["model"] == selected_name
-    selected_model, selected_pred, selected_prob = fitted[selected_name]
+    selected_model, selected_pred, selected_score = fitted[selected_name]
     pd.DataFrame(metric_rows).sort_values("model").to_csv(OUT / "classification_metrics.csv", index=False)
     pd.DataFrame({"pn": id_test.values, "actual_label": y_test.values,
-                  "predicted_label": selected_pred, "predicted_probability": selected_prob,
+                  "predicted_label": selected_pred, "predicted_probability": selected_score,
                   "selected_model": selected_name}).to_csv(
         OUT / "classification_predictions.csv", index=False)
     cm = confusion_matrix(y_test, selected_pred, labels=[0, 1])
@@ -198,12 +152,12 @@ def classification(df: pd.DataFrame) -> None:
     fig.tight_layout(); fig.savefig(OUT / "classification_confusion_matrix.png", dpi=160); plt.close(fig)
     comparison = pd.DataFrame(metric_rows).sort_values("cv_f1_mean", ascending=True)
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    ax.barh(comparison["model"], comparison["f1"], label="Held-out F1", color="#4472c4")
-    ax.scatter(comparison["cv_f1_mean"], comparison["model"], color="#c55a11", zorder=3, label="Training CV F1")
-    ax.set(title="Classification Model Comparison", xlabel="Positive-class F1", ylabel="Model")
+    ax.barh(comparison["model"], comparison["accuracy"], label="Held-out accuracy", color="#4472c4")
+    ax.scatter(comparison["cv_accuracy_mean"], comparison["model"], color="#c55a11", zorder=3, label="Training CV accuracy")
+    ax.set(title="Classification Model Comparison", xlabel="Accuracy", ylabel="Model")
     ax.legend(); fig.tight_layout(); fig.savefig(OUT / "classification_model_comparison.png", dpi=160); plt.close(fig)
     chosen = next(row for row in metric_rows if row["model"] == selected_name)
-    print(f"[classification] labelled={len(labelled):,}; class-1={y.sum():,} ({y.mean():.1%}); train={len(x_train):,}; test={len(x_test):,}; selected={selected_name}; F1={chosen['f1']:.3f}; accuracy={chosen['accuracy']:.3f}")
+    print(f"[classification] train={len(x_train):,}; test={len(x_test):,}; selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
 
 
 def clustering(df: pd.DataFrame) -> None:
