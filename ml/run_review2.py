@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import sqlite3
 import argparse
+from collections import Counter
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib
@@ -39,6 +41,10 @@ OUT = ROOT / "outputs"
 SEED = 2026
 NUMERIC = ["pages", "claims", "inventors", "family_size", "npl_count", "backward_citations", "ipc_count"]
 CATEGORICAL = ["country_code", "kind_code", "ipc_subclass"]
+SAFE_NUMERIC = [name for name in NUMERIC if name != "family_size"]
+ENRICHED_NUMERIC = ["ipc_subclass_diversity", "ipc_section_diversity", "ipc_pair_count",
+                    "new_ipc_subclass_count", "new_ipc_pair_count", "inventor_prior_patent_mean",
+                    "inventor_prior_patent_max", "title_word_count", "abstract_word_count"]
 
 
 def warehouse_data() -> pd.DataFrame:
@@ -58,61 +64,98 @@ def warehouse_data() -> pd.DataFrame:
         return pd.read_sql_query(query, con)
 
 
-def classification(df: pd.DataFrame) -> None:
-    """Select a leakage-free accuracy model using fixed-split training CV only."""
-    labelled = df.dropna(subset=["is_highly_cited"]).copy()
-    x, y = labelled[NUMERIC + CATEGORICAL], labelled["is_highly_cited"].astype(int)
-    x_train, x_test, y_train, y_test, _, id_test = train_test_split(
-        x, y, labelled["pn"], test_size=0.20, random_state=SEED, stratify=y
-    )
-    print(f"[classification] features={NUMERIC + CATEGORICAL}")
-    print(f"[classification] dtypes={x.dtypes.astype(str).to_dict()}; missing={x.isna().sum().to_dict()}")
-    print(f"[classification] labelled={len(labelled):,}; class_distribution={y.value_counts().sort_index().to_dict()}; duplicate_pn={labelled.pn.duplicated().sum()}")
-    print("[classification] paper mapping: VC=ipc_count, FM=family_size*, PG=pages, CL=claims, VTciting=backward_citations, NPL=npl_count, IV=inventors; *family timing uncertain. IPC novelty/combinations, figures, cited-patent IPC diversity/novelty, science and inventor-history indicators are unavailable.")
+def enriched_classification_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive publication-time IPC, inventor-history, and text-length features from raw data.
 
-    standard_prep = ColumnTransformer([
-        ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), NUMERIC),
-        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore"))]), CATEGORICAL),
-    ])
-    log_prep = ColumnTransformer([
-        ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), NUMERIC),
-        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
-    ])
-    hgb_prep = ColumnTransformer([
-        ("num", SimpleImputer(strategy="median"), NUMERIC),
-        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL),
-    ])
+    Historical values use only strictly earlier application years: patents from the
+    same year never contribute to one another's history.
+    """
+    raw = pd.read_excel(RAW, usecols=["PN", "APP YEAR", "IPC", "INVENTORS", "TITLE", "ABSTRACT"])
+    raw = raw.drop_duplicates("PN").copy()
+    raw["app_year"] = pd.to_numeric(raw["APP YEAR"], errors="coerce")
+    raw["ipc_codes"] = raw["IPC"].astype(str).str.upper().apply(lambda value: set(re.findall(r"[A-H]\d{2}[A-Z]", value)))
+    raw["inventor_names"] = raw["INVENTORS"].astype(str).apply(lambda value: {name.strip() for name in value.split("|") if name.strip() and name.strip() != "-"})
+    raw["ipc_subclass_diversity"] = raw["ipc_codes"].apply(len)
+    raw["ipc_section_diversity"] = raw["ipc_codes"].apply(lambda codes: len({code[0] for code in codes}))
+    raw["ipc_pair_count"] = raw["ipc_codes"].apply(lambda codes: len(list(combinations(sorted(codes), 2))))
+    raw["title_word_count"] = raw["TITLE"].astype(str).str.findall(r"\b\w+\b").str.len()
+    raw["abstract_word_count"] = raw["ABSTRACT"].astype(str).str.findall(r"\b\w+\b").str.len()
+    historical = {name: [] for name in ["new_ipc_subclass_count", "new_ipc_pair_count", "inventor_prior_patent_mean", "inventor_prior_patent_max"]}
+    seen_codes, seen_pairs, inventor_counts = set(), set(), Counter()
+    for _, group in raw.sort_values("app_year").groupby("app_year", sort=True):
+        for row in group.itertuples():
+            pairs = set(combinations(sorted(row.ipc_codes), 2))
+            prior = [inventor_counts[name] for name in row.inventor_names]
+            historical["new_ipc_subclass_count"].append((row.Index, len(row.ipc_codes - seen_codes)))
+            historical["new_ipc_pair_count"].append((row.Index, len(pairs - seen_pairs)))
+            historical["inventor_prior_patent_mean"].append((row.Index, float(np.mean(prior)) if prior else 0.0))
+            historical["inventor_prior_patent_max"].append((row.Index, float(max(prior)) if prior else 0.0))
+        for row in group.itertuples():
+            seen_codes.update(row.ipc_codes)
+            seen_pairs.update(combinations(sorted(row.ipc_codes), 2))
+            inventor_counts.update(row.inventor_names)
+    for name, values in historical.items():
+        raw[name] = 0.0
+        raw.loc[[index for index, _ in values], name] = [value for _, value in values]
+    features = raw[["PN"] + ENRICHED_NUMERIC].rename(columns={"PN": "pn"})
+    return df.merge(features, on="pn", how="left", validate="one_to_one")
+
+
+def classification(df: pd.DataFrame) -> None:
+    """Compare current and safely enriched features under the fixed split."""
+    enriched = enriched_classification_data(df).dropna(subset=["is_highly_cited"]).copy()
+    y = enriched["is_highly_cited"].astype(int)
+    train_index, test_index = train_test_split(enriched.index, test_size=0.20, random_state=SEED, stratify=y)
+    print(f"[classification] baseline={NUMERIC + CATEGORICAL}; enriched={SAFE_NUMERIC + ENRICHED_NUMERIC + CATEGORICAL}")
+    print(f"[classification] enriched missing={enriched[ENRICHED_NUMERIC].isna().sum().to_dict()}; labels={y.value_counts().sort_index().to_dict()}")
     cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
-    # C and gamma searches are small and fitted only on the training partition.
-    experiments = {
-        "svm_rbf_standard": (Pipeline([( "prepare", standard_prep), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [0.5, 1.0], "model__gamma": ["scale", 0.01]}, "standard scaled numeric + one-hot categorical"),
-        "svm_rbf_log_numeric": (Pipeline([( "prepare", log_prep), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [1.0], "model__gamma": ["scale"]}, "median/log1p/scaled numeric + rare-category grouping"),
-        "svm_rbf_balanced": (Pipeline([( "prepare", standard_prep), ("model", SVC(kernel="rbf", class_weight="balanced", random_state=SEED))]), {"model__C": [0.5], "model__gamma": ["scale"]}, "standard preprocessing; class_weight=balanced"),
-        "hist_gradient_boosting": (Pipeline([( "prepare", hgb_prep), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(NUMERIC) + [True] * len(CATEGORICAL), max_iter=100, max_leaf_nodes=7, random_state=SEED))]), {"model__l2_regularization": [0.0]}, "median numeric + ordinal categorical; native categorical boosting"),
-    }
+
+    def svm_prep(numeric):
+        return ColumnTransformer([
+            ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), numeric),
+            ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
+        ])
+
+    def hgb_prep(numeric):
+        return ColumnTransformer([
+            ("num", SimpleImputer(strategy="median"), numeric),
+            ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL),
+        ])
+
+    feature_sets = {"baseline": NUMERIC, "enriched_timing_safe": SAFE_NUMERIC + ENRICHED_NUMERIC}
+    experiments = {}
+    baseline_numeric = feature_sets["baseline"]
+    enriched_numeric = feature_sets["enriched_timing_safe"]
+    experiments["baseline_svm"] = (baseline_numeric, Pipeline([( "prepare", svm_prep(baseline_numeric)), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [0.5, 1.0], "model__gamma": ["scale"]}, "log1p/scaled numeric plus grouped one-hot categorical")
+    for label, numeric in [("baseline", baseline_numeric), ("enriched_timing_safe", enriched_numeric)]:
+        experiments[f"{label}_hgb"] = (numeric, Pipeline([( "prepare", hgb_prep(numeric)), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(numeric) + [True] * len(CATEGORICAL), max_iter=100, max_leaf_nodes=7, random_state=SEED))]), {"model__l2_regularization": [0.0]}, "median numeric plus native categorical boosting")
     searches = {}
-    for name, (pipeline, grid, _) in experiments.items():
+    for name, (numeric, pipeline, grid, _) in experiments.items():
+        x_train, y_train = enriched.loc[train_index, numeric + CATEGORICAL], y.loc[train_index]
         search = GridSearchCV(pipeline, grid, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
         search.fit(x_train, y_train)
         searches[name] = search
         print(f"[classification] {name}: CV accuracy={search.best_score_:.3f}; params={search.best_params_}", flush=True)
 
-    models = {
-        "majority_baseline": Pipeline([( "prepare", standard_prep), ("model", DummyClassifier(strategy="most_frequent"))]),
-        "random_forest": Pipeline([( "prepare", standard_prep), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt", class_weight="balanced", random_state=SEED, n_jobs=1))]),
-        **{name: search.best_estimator_ for name, search in searches.items()},
-    }
-    feature_notes = {name: note for name, (_, _, note) in experiments.items()}
-    feature_notes.update({"majority_baseline": "standard scaled numeric + one-hot categorical", "random_forest": "standard scaled numeric + one-hot categorical"})
-    cv_accuracy = {"majority_baseline": np.nan, "random_forest": np.nan}
-    cv_f1 = {"majority_baseline": np.nan, "random_forest": np.nan}
-    for name, model in models.items():
-        if name in searches:
-            cv_accuracy[name] = searches[name].best_score_
-            cv_f1[name] = searches[name].cv_results_["mean_test_f1"][searches[name].best_index_]
+    models = {name: search.best_estimator_ for name, search in searches.items()}
+    models["majority_baseline"] = Pipeline([( "prepare", svm_prep(NUMERIC)), ("model", DummyClassifier(strategy="most_frequent"))])
+    models["baseline_random_forest"] = Pipeline([( "prepare", svm_prep(NUMERIC)), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt", class_weight="balanced", random_state=SEED, n_jobs=1))])
+    feature_map = {name: numeric for name, (numeric, _, _, _) in experiments.items()}
+    feature_map["majority_baseline"] = NUMERIC
+    feature_map["baseline_random_forest"] = NUMERIC
+    feature_notes = {name: note for name, (_, _, _, note) in experiments.items()}
+    feature_notes["majority_baseline"] = "current baseline feature set"
+    feature_notes["baseline_random_forest"] = "current baseline feature set; class-weighted random forest"
+    cv_accuracy = {name: search.best_score_ for name, search in searches.items()}
+    cv_f1 = {name: search.cv_results_["mean_test_f1"][search.best_index_] for name, search in searches.items()}
+    cv_accuracy["majority_baseline"] = np.nan; cv_f1["majority_baseline"] = np.nan
+    cv_accuracy["baseline_random_forest"] = np.nan; cv_f1["baseline_random_forest"] = np.nan
 
     metric_rows, fitted = [], {}
     for name, pipeline in models.items():
+        numeric = feature_map[name]
+        x_train, x_test = enriched.loc[train_index, numeric + CATEGORICAL], enriched.loc[test_index, numeric + CATEGORICAL]
+        y_train, y_test = y.loc[train_index], y.loc[test_index]
         pipeline.fit(x_train, y_train)
         pred = pipeline.predict(x_test)
         score = pipeline.predict_proba(x_test)[:, 1] if hasattr(pipeline, "predict_proba") else pipeline.decision_function(x_test)
@@ -127,7 +170,7 @@ def classification(df: pd.DataFrame) -> None:
             "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score),
             "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": cv_accuracy[name], "cv_f1_mean": cv_f1[name],
             "feature_preprocessing": feature_notes[name],
-            "selected_hyperparameters": str(searches[name].best_params_) if name in searches else "fixed current configuration",
+            "selected_hyperparameters": str(searches[name].best_params_) if name in searches else ("n_estimators=300, min_samples_leaf=2, class_weight=balanced" if name == "baseline_random_forest" else "most_frequent"),
             "paper_reported_svm_accuracy": 0.861,
         })
         fitted[name] = (pipeline, pred, score)
@@ -136,7 +179,7 @@ def classification(df: pd.DataFrame) -> None:
     for row in metric_rows: row["selected_by_training_cv"] = row["model"] == selected_name
     selected_model, selected_pred, selected_score = fitted[selected_name]
     pd.DataFrame(metric_rows).sort_values("model").to_csv(OUT / "classification_metrics.csv", index=False)
-    pd.DataFrame({"pn": id_test.values, "actual_label": y_test.values,
+    pd.DataFrame({"pn": enriched.loc[test_index, "pn"].values, "actual_label": y.loc[test_index].values,
                   "predicted_label": selected_pred, "predicted_probability": selected_score,
                   "selected_model": selected_name}).to_csv(
         OUT / "classification_predictions.csv", index=False)
@@ -157,7 +200,7 @@ def classification(df: pd.DataFrame) -> None:
     ax.set(title="Classification Model Comparison", xlabel="Accuracy", ylabel="Model")
     ax.legend(); fig.tight_layout(); fig.savefig(OUT / "classification_model_comparison.png", dpi=160); plt.close(fig)
     chosen = next(row for row in metric_rows if row["model"] == selected_name)
-    print(f"[classification] train={len(x_train):,}; test={len(x_test):,}; selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
+    print(f"[classification] train={len(train_index):,}; test={len(test_index):,}; selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
 
 
 def clustering(df: pd.DataFrame) -> None:
