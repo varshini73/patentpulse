@@ -320,6 +320,87 @@ def svm_optimization_experiment(df: pd.DataFrame) -> None:
     print(f"[svm] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
 
 
+def paper_aligned_svm_experiment(df: pd.DataFrame) -> None:
+    """Test only the paper indicators that have defensible workbook equivalents.
+
+    This deliberately does not turn partial raw fields into claimed equivalents
+    of cited-patent or scientific-citation indicators from Han et al. (2022).
+    """
+    labelled = df.dropna(subset=["is_highly_cited"]).copy()
+    # VC is approximated by the supplied IPC count, while the other five are
+    # direct workbook fields.  FM remains present for an apples-to-apples paper
+    # comparison, but is explicitly marked timing-uncertain in every output.
+    paper_numeric = ["ipc_count", "family_size", "pages", "claims", "npl_count", "inventors"]
+    x, y = labelled[NUMERIC + CATEGORICAL], labelled["is_highly_cited"].astype(int)
+    x_train, x_test, y_train, y_test, _, id_test = train_test_split(
+        x, y, labelled["pn"], test_size=0.20, random_state=SEED, stratify=y
+    )
+    print("[paper-svm] paper-aligned usable indicators: VC~ipc_count, FM=family_size, PG=pages, CL=claims, NPL=npl_count, IV=inventors")
+    print("[paper-svm] unavailable as exact equivalents: VCnew, CCnew, figures, TCciting, NTciting, VSciting, SCciting, NSciting, VPaverage; three-year citations and target excluded")
+    print(f"[paper-svm] fixed random split: train={len(x_train):,} ({y_train.value_counts().sort_index().to_dict()}), test={len(x_test):,} ({y_test.value_counts().sort_index().to_dict()})")
+
+    def paper_prep(log_numeric: bool) -> ColumnTransformer:
+        steps = [("impute", SimpleImputer(strategy="median"))]
+        if log_numeric:
+            steps.append(("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")))
+        steps.append(("scale", StandardScaler()))
+        return ColumnTransformer([("paper_numeric", Pipeline(steps), paper_numeric)])
+
+    def current_prep() -> ColumnTransformer:
+        return ColumnTransformer([
+            ("num", Pipeline([("impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), NUMERIC),
+            ("cat", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
+        ])
+
+    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
+    grid = {"model__C": [0.5, 1.0, 2.0], "model__gamma": ["scale", 0.01]}
+    candidates = {
+        "paper_aligned_rbf_standard": (Pipeline([("prepare", paper_prep(False)), ("model", SVC(kernel="rbf", random_state=SEED))]), grid, "six paper-aligned numeric indicators; median imputation, standard scaling"),
+        "paper_aligned_rbf_log_numeric": (Pipeline([("prepare", paper_prep(True)), ("model", SVC(kernel="rbf", random_state=SEED))]), grid, "six paper-aligned numeric indicators; median imputation, log1p, standard scaling"),
+    }
+    rows, fitted = [], {}
+    timing_note = "family_size is timing-uncertain; all citation-window outcomes, forward citations, and target fields excluded"
+    for name, (pipeline, parameters, preprocessing) in candidates.items():
+        search = GridSearchCV(pipeline, parameters, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
+        search.fit(x_train[paper_numeric], y_train)
+        model = search.best_estimator_; pred = model.predict(x_test[paper_numeric]); score = model.decision_function(x_test[paper_numeric])
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "candidate_type": "Paper-aligned SVM tuned by training CV", "feature_set": ", ".join(paper_numeric), "paper_indicator_coverage": "6 direct/near-direct fields; IPC count is not verified as paper bottom-level VC", "train_records": len(x_train), "test_records": len(x_test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": search.best_score_, "cv_f1_mean": search.cv_results_["mean_test_f1"][search.best_index_], "preprocessing": preprocessing, "selected_hyperparameters": str(search.best_params_), "timing_note": timing_note})
+        fitted[name] = (pred, score)
+        print(f"[paper-svm] {name}: CV accuracy={search.best_score_:.3f}; test accuracy={rows[-1]['accuracy']:.3f}")
+
+    # These are comparators only; they use the existing broader feature system.
+    hgb_prep = ColumnTransformer([("num", SimpleImputer(strategy="median"), NUMERIC), ("cat", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL)])
+    comparators = {
+        "majority_baseline": (Pipeline([("prepare", current_prep()), ("model", DummyClassifier(strategy="most_frequent"))]), "Current broader feature system"),
+        "existing_tuned_log_rbf_svm": (Pipeline([("prepare", current_prep()), ("model", SVC(kernel="rbf", C=1.0, gamma="scale", random_state=SEED))]), "Existing tuned SVM configuration; broader feature system"),
+        "existing_hgb": (Pipeline([("prepare", hgb_prep), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(NUMERIC) + [True] * len(CATEGORICAL), max_iter=100, max_leaf_nodes=7, l2_regularization=0.0, random_state=SEED))]), "Existing HGB configuration; broader feature system"),
+        "existing_class_weighted_random_forest": (Pipeline([("prepare", current_prep()), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt", class_weight="balanced", random_state=SEED, n_jobs=1))]), "Existing class-weighted RF configuration; broader feature system"),
+    }
+    for name, (model, note) in comparators.items():
+        model.fit(x_train, y_train); pred = model.predict(x_test)
+        score = model.predict_proba(x_test)[:, 1] if hasattr(model, "predict_proba") else model.decision_function(x_test)
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "candidate_type": "Fixed existing comparator", "feature_set": ", ".join(NUMERIC + CATEGORICAL), "paper_indicator_coverage": "Not a paper-aligned feature set", "train_records": len(x_train), "test_records": len(x_test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": np.nan, "cv_f1_mean": np.nan, "preprocessing": note, "selected_hyperparameters": "fixed existing configuration", "timing_note": timing_note})
+
+    selected_name = max((row for row in rows if row["candidate_type"] == "Paper-aligned SVM tuned by training CV"), key=lambda row: (row["cv_accuracy_mean"], row["cv_f1_mean"]))["model"]
+    for row in rows: row["selected_by_training_cv"] = row["model"] == selected_name
+    selected_pred, selected_score = fitted[selected_name]
+    pd.DataFrame(rows).sort_values("model").to_csv(OUT / "paper_aligned_svm_metrics.csv", index=False)
+    pd.DataFrame({"pn": id_test.values, "actual_label": y_test.values, "predicted_label": selected_pred, "decision_score": selected_score, "selected_model": selected_name}).to_csv(OUT / "paper_aligned_svm_predictions.csv", index=False)
+    cm = confusion_matrix(y_test, selected_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(5, 4)); image = ax.imshow(cm, cmap="Blues")
+    for (row, col), value in np.ndenumerate(cm): ax.text(col, row, str(value), ha="center", va="center")
+    ax.set(xticks=[0, 1], yticks=[0, 1], xticklabels=["Not highly cited", "Highly cited"], yticklabels=["Not highly cited", "Highly cited"], xlabel="Predicted label", ylabel="Actual label", title=f"Paper-aligned SVM: {selected_name.replace('_', ' ').title()}")
+    fig.colorbar(image, ax=ax, label="Patent count"); fig.tight_layout(); fig.savefig(OUT / "paper_aligned_svm_confusion_matrix.png", dpi=160); plt.close(fig)
+    comparison = pd.DataFrame(rows).sort_values("accuracy")
+    fig, ax = plt.subplots(figsize=(9, 5)); ax.barh(comparison["model"], comparison["accuracy"], color="#4472c4")
+    ax.axvline(.861, color="#c55a11", linestyle="--", label="Paper SVM reference (non-equivalent)")
+    ax.set(title="Paper-aligned SVM Experiment: Held-out Accuracy", xlabel="Accuracy", ylabel="Model"); ax.legend(); fig.tight_layout(); fig.savefig(OUT / "paper_aligned_svm_comparison.png", dpi=160); plt.close(fig)
+    chosen = next(row for row in rows if row["model"] == selected_name)
+    print(f"[paper-svm] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
+
+
 def clustering(df: pd.DataFrame) -> None:
     # Excludes citation outcomes and all impact labels to keep clusters structural/technological.
     x = df[NUMERIC + CATEGORICAL]
@@ -436,7 +517,8 @@ def prediction(df: pd.DataFrame) -> None:
     ax.legend(); fig.tight_layout(); fig.savefig(OUT / "patent_trend_forecast.png", dpi=160); plt.close(fig)
 
 
-def main(classification_only: bool = False, chronological_only: bool = False, svm_optimization_only: bool = False) -> None:
+def main(classification_only: bool = False, chronological_only: bool = False, svm_optimization_only: bool = False,
+         paper_aligned_svm_only: bool = False) -> None:
     if not DB.exists() or not RAW.exists():
         raise FileNotFoundError("Both data/warehouse/patentpulse.db and data/raw/dataset.xlsx are required.")
     OUT.mkdir(exist_ok=True)
@@ -444,13 +526,15 @@ def main(classification_only: bool = False, chronological_only: bool = False, sv
     print(f"[validation] warehouse patents={len(df):,}; labelled={df.is_highly_cited.notna().sum():,}; highly cited={df.is_highly_cited.sum():.0f}")
     if svm_optimization_only:
         svm_optimization_experiment(df)
+    elif paper_aligned_svm_only:
+        paper_aligned_svm_experiment(df)
     elif chronological_only:
         chronological_classification(df)
     else:
         classification(df)
-    if not classification_only and not chronological_only and not svm_optimization_only:
+    if not classification_only and not chronological_only and not svm_optimization_only and not paper_aligned_svm_only:
         clustering(df); rules(); prediction(df)
-    mode = "Focused SVM optimization" if svm_optimization_only else ("Chronological classification" if chronological_only else ("Classification" if classification_only else "Review 2"))
+    mode = "Paper-aligned SVM experiment" if paper_aligned_svm_only else ("Focused SVM optimization" if svm_optimization_only else ("Chronological classification" if chronological_only else ("Classification" if classification_only else "Review 2")))
     print(f"[complete] {mode} outputs saved to {OUT}")
 
 
@@ -459,4 +543,5 @@ if __name__ == "__main__":
     parser.add_argument("--classification-only", action="store_true", help="Update classification outputs without rerunning other mining tasks.")
     parser.add_argument("--chronological-only", action="store_true", help="Run the separate chronological classification experiment only.")
     parser.add_argument("--svm-optimization-only", action="store_true", help="Run the focused SVM optimization experiment only.")
+    parser.add_argument("--paper-aligned-svm-only", action="store_true", help="Run the separate paper-aligned SVM experiment only.")
     main(**vars(parser.parse_args()))
