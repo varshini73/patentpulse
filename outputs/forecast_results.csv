@@ -1,0 +1,532 @@
+pub_year,actual_count,technology_domain,linear_regression_prediction,previous_year_baseline,row_type
+1977,4.0,All technology sections,,,historical
+1978,19.0,All technology sections,,,historical
+1979,15.0,All technology sections,,,historical
+1980,20.0,All technology sections,,,historical
+1981,16.0,All technology sections,,,historical
+1982,23.0,All technology sections,,,historical
+1983,19.0,All technology sections,,,historical
+1984,14.0,All technology sections,,,historical
+1985,13.0,All technology sections,,,historical
+1986,9.0,All technology sections,,,historical
+1987,15.0,All technology sections,,,historical
+1988,11.0,All technology sections,,,historical
+1989,2.0,All technology sections,,,historical
+1990,7.0,All technology sections,,,historical
+1991,6.0,All technology sections,,,historical
+1992,22.0,All technology sections,,,historical
+1993,26.0,All technology sections,,,historical
+1994,67.0,All technology sections,,,historical
+1995,69.0,All technology sections,,,historical
+1996,103.0,All technology sections,,,historical
+1997,115.0,All technology sections,,,historical
+1998,129.0,All technology sections,,,historical
+1999,100.0,All technology sections,,,historical
+2000,87.0,All technology sections,,,historical
+2001,116.0,All technology sections,,,historical
+2002,139.0,All technology sections,,,historical
+2003,121.0,All technology sections,,,historical
+2004,117.0,All technology sections,,,historical
+2005,139.0,All technology sections,,,historical
+2006,127.0,All technology sections,,,historical
+2007,158.0,All technology sections,,,historical
+2008,129.0,All technology sections,,,historical
+2009,177.0,All technology sections,,,historical
+2010,293.0,All technology sections,,,historical
+2011,379.0,All technology sections,,,historical
+2012,498.0,All technology sections,,,historical
+2013,642.0,All technology sections,,,historical
+2014,732.0,All technology sections,,,historical
+2015,912.0,All technology sections,,,historical
+2016,899.0,All technology sections,,,historical
+2017,920.0,All technology sections,,,historical
+2018,920.0,All technology sections,,,historical
+2019,1142.0,All technology sections,,,historical
+2020,1461.0,All technology sections,,,historical
+2021,1882.0,All technology sections,,,historical
+2022,36.0,All technology sections,,,historical
+2013,642.0,All technology sections,244.9015873015851,498.0,held_out_test
+2014,732.0,All technology sections,253.17854997854738,642.0,held_out_test
+2015,912.0,All technology sections,261.45551265550966,732.0,held_out_test
+2016,899.0,All technology sections,269.7324753324756,912.0,held_out_test
+2017,920.0,All technology sections,278.0094380094379,899.0,held_out_test
+2018,920.0,All technology sections,286.28640068640016,920.0,held_out_test
+2019,1142.0,All technology sections,294.56336336336244,920.0,held_out_test
+2020,1461.0,All technology sections,302.8403260403247,1142.0,held_out_test
+2021,1882.0,All technology sections,311.117288717287,1461.0,held_out_test
+2022,36.0,All technology sections,319.3942513942493,1882.0,held_out_test
+2023,,All technology sections,327.6712140712116,,future_forecast
+2024,,All technology sections,335.94817674817386,,future_forecast
+2025,,All technology sections,344.2251394251398,,future_forecast
+1977,0.0,A,,,historical
+1978,0.0,A,,,historical
+1979,0.0,A,,,historical
+1980,0.0,A,,,historical
+1981,0.0,A,,,historical
+1982,0.0,A,,,historical
+1983,0.0,A,,,historical
+1984,2.0,A,,,historical
+1985,1.0,A,,,historical
+1986,0.0,A,,,historical
+1987,2.0,A,,,historical
+1988,1.0,A,,,historical
+1989,0.0,A,,,historical
+1990,0.0,A,,,historical
+1991,0.0,A,,,historical
+1992,2.0,A,,,historical
+1993,1.0,A,,,historical
+1994,2.0,A,,,historical
+1995,0.0,A,,,historical
+1996,0.0,A,,,historical
+1997,2.0,A,,,historical
+1998,0.0,A,,,historical
+1999,1.0,A,,,historical
+2000,1.0,A,,,historical
+2001,1.0,A,,,historical
+2002,1.0,A,,,historical
+2003,1.0,A,,,historical
+2004,1.0,A,,,historical
+2005,3.0,A,,,historical
+2006,3.0,A,,,historical
+2007,1.0,A,,,historical
+2008,1.0,A,,,historical
+2009,0.0,A,,,historical
+2010,1.0,A,,,historical
+2011,1.0,A,,,historical
+2012,2.0,A,,,historical
+2013,2.0,A,,,historical
+2014,4.0,A,,,historical
+2015,3.0,A,,,historical
+2016,0.0,A,,,historical
+2017,0.0,A,,,historical
+2018,6.0,A,,,historical
+2019,14.0,A,,,historical
+2020,8.0,A,,,historical
+2021,14.0,A,,,historical
+2022,0.0,A,,,historical
+2013,2.0,A,1.558730158730171,2.0,held_out_test
+2014,4.0,A,1.5964392964393,2.0,held_out_test
+2015,3.0,A,1.6341484341484431,4.0,held_out_test
+2016,0.0,A,1.6718575718575721,3.0,held_out_test
+2017,0.0,A,1.7095667095667153,0.0,held_out_test
+2018,6.0,A,1.7472758472758585,0.0,held_out_test
+2019,14.0,A,1.7849849849849875,6.0,held_out_test
+2020,8.0,A,1.8226941226941307,14.0,held_out_test
+2021,14.0,A,1.8604032604032597,8.0,held_out_test
+2022,0.0,A,1.8981123981124028,14.0,held_out_test
+2023,,A,1.935821535821546,,future_forecast
+2024,,A,1.973530673530675,,future_forecast
+2025,,A,2.011239811239818,,future_forecast
+1977,1.0,B,,,historical
+1978,11.0,B,,,historical
+1979,4.0,B,,,historical
+1980,9.0,B,,,historical
+1981,8.0,B,,,historical
+1982,14.0,B,,,historical
+1983,8.0,B,,,historical
+1984,5.0,B,,,historical
+1985,8.0,B,,,historical
+1986,5.0,B,,,historical
+1987,9.0,B,,,historical
+1988,5.0,B,,,historical
+1989,2.0,B,,,historical
+1990,6.0,B,,,historical
+1991,5.0,B,,,historical
+1992,15.0,B,,,historical
+1993,17.0,B,,,historical
+1994,52.0,B,,,historical
+1995,49.0,B,,,historical
+1996,79.0,B,,,historical
+1997,67.0,B,,,historical
+1998,97.0,B,,,historical
+1999,74.0,B,,,historical
+2000,59.0,B,,,historical
+2001,78.0,B,,,historical
+2002,96.0,B,,,historical
+2003,75.0,B,,,historical
+2004,83.0,B,,,historical
+2005,83.0,B,,,historical
+2006,48.0,B,,,historical
+2007,69.0,B,,,historical
+2008,52.0,B,,,historical
+2009,49.0,B,,,historical
+2010,101.0,B,,,historical
+2011,122.0,B,,,historical
+2012,130.0,B,,,historical
+2013,224.0,B,,,historical
+2014,320.0,B,,,historical
+2015,372.0,B,,,historical
+2016,361.0,B,,,historical
+2017,402.0,B,,,historical
+2018,426.0,B,,,historical
+2019,513.0,B,,,historical
+2020,685.0,B,,,historical
+2021,960.0,B,,,historical
+2022,19.0,B,,,historical
+2013,224.0,B,103.02222222222281,130.0,held_out_test
+2014,320.0,B,106.19609609609597,224.0,held_out_test
+2015,372.0,B,109.36996996997004,320.0,held_out_test
+2016,361.0,B,112.54384384384412,372.0,held_out_test
+2017,402.0,B,115.71771771771819,361.0,held_out_test
+2018,426.0,B,118.89159159159226,402.0,held_out_test
+2019,513.0,B,122.06546546546542,426.0,held_out_test
+2020,685.0,B,125.2393393393395,513.0,held_out_test
+2021,960.0,B,128.41321321321357,685.0,held_out_test
+2022,19.0,B,131.58708708708764,960.0,held_out_test
+2023,,B,134.7609609609608,,future_forecast
+2024,,B,137.93483483483487,,future_forecast
+2025,,B,141.10870870870895,,future_forecast
+1977,0.0,C,,,historical
+1978,1.0,C,,,historical
+1979,0.0,C,,,historical
+1980,0.0,C,,,historical
+1981,0.0,C,,,historical
+1982,0.0,C,,,historical
+1983,1.0,C,,,historical
+1984,0.0,C,,,historical
+1985,0.0,C,,,historical
+1986,0.0,C,,,historical
+1987,0.0,C,,,historical
+1988,0.0,C,,,historical
+1989,0.0,C,,,historical
+1990,0.0,C,,,historical
+1991,0.0,C,,,historical
+1992,0.0,C,,,historical
+1993,0.0,C,,,historical
+1994,0.0,C,,,historical
+1995,0.0,C,,,historical
+1996,0.0,C,,,historical
+1997,1.0,C,,,historical
+1998,0.0,C,,,historical
+1999,0.0,C,,,historical
+2000,0.0,C,,,historical
+2001,1.0,C,,,historical
+2002,3.0,C,,,historical
+2003,0.0,C,,,historical
+2004,1.0,C,,,historical
+2005,2.0,C,,,historical
+2006,1.0,C,,,historical
+2007,1.0,C,,,historical
+2008,1.0,C,,,historical
+2009,0.0,C,,,historical
+2010,2.0,C,,,historical
+2011,2.0,C,,,historical
+2012,7.0,C,,,historical
+2013,4.0,C,,,historical
+2014,10.0,C,,,historical
+2015,4.0,C,,,historical
+2016,5.0,C,,,historical
+2017,4.0,C,,,historical
+2018,8.0,C,,,historical
+2019,10.0,C,,,historical
+2020,15.0,C,,,historical
+2021,25.0,C,,,historical
+2022,1.0,C,,,historical
+2013,4.0,C,1.895238095238085,7.0,held_out_test
+2014,10.0,C,1.9616473616473513,4.0,held_out_test
+2015,4.0,C,2.0280566280566177,10.0,held_out_test
+2016,5.0,C,2.094465894465884,4.0,held_out_test
+2017,4.0,C,2.1608751608751504,5.0,held_out_test
+2018,8.0,C,2.227284427284417,4.0,held_out_test
+2019,10.0,C,2.293693693693683,8.0,held_out_test
+2020,15.0,C,2.3601029601029495,10.0,held_out_test
+2021,25.0,C,2.426512226512216,15.0,held_out_test
+2022,1.0,C,2.4929214929214822,25.0,held_out_test
+2023,,C,2.5593307593307486,,future_forecast
+2024,,C,2.625740025740015,,future_forecast
+2025,,C,2.6921492921492813,,future_forecast
+1977,0.0,D,,,historical
+1978,0.0,D,,,historical
+1979,0.0,D,,,historical
+1980,0.0,D,,,historical
+1981,0.0,D,,,historical
+1982,0.0,D,,,historical
+1983,0.0,D,,,historical
+1984,0.0,D,,,historical
+1985,0.0,D,,,historical
+1986,0.0,D,,,historical
+1987,0.0,D,,,historical
+1988,0.0,D,,,historical
+1989,0.0,D,,,historical
+1990,0.0,D,,,historical
+1991,0.0,D,,,historical
+1992,0.0,D,,,historical
+1993,0.0,D,,,historical
+1994,0.0,D,,,historical
+1995,1.0,D,,,historical
+1996,0.0,D,,,historical
+1997,0.0,D,,,historical
+1998,0.0,D,,,historical
+1999,0.0,D,,,historical
+2000,0.0,D,,,historical
+2001,0.0,D,,,historical
+2002,0.0,D,,,historical
+2003,0.0,D,,,historical
+2004,0.0,D,,,historical
+2005,0.0,D,,,historical
+2006,1.0,D,,,historical
+2007,0.0,D,,,historical
+2008,0.0,D,,,historical
+2009,0.0,D,,,historical
+2010,0.0,D,,,historical
+2011,0.0,D,,,historical
+2012,0.0,D,,,historical
+2013,0.0,D,,,historical
+2014,0.0,D,,,historical
+2015,0.0,D,,,historical
+2016,0.0,D,,,historical
+2017,0.0,D,,,historical
+2018,0.0,D,,,historical
+2019,0.0,D,,,historical
+2020,1.0,D,,,historical
+2021,3.0,D,,,historical
+2022,0.0,D,,,historical
+2013,0.0,D,0.1126984126984123,0.0,held_out_test
+2014,0.0,D,0.11578721578721485,0.0,held_out_test
+2015,0.0,D,0.11887601887601829,0.0,held_out_test
+2016,0.0,D,0.12196482196482172,0.0,held_out_test
+2017,0.0,D,0.12505362505362427,0.0,held_out_test
+2018,0.0,D,0.1281424281424277,0.0,held_out_test
+2019,0.0,D,0.13123123123123026,0.0,held_out_test
+2020,1.0,D,0.1343200343200337,0.0,held_out_test
+2021,3.0,D,0.13740883740883714,1.0,held_out_test
+2022,0.0,D,0.1404976404976397,3.0,held_out_test
+2023,,D,0.14358644358644312,,future_forecast
+2024,,D,0.14667524667524567,,future_forecast
+2025,,D,0.1497640497640491,,future_forecast
+1977,0.0,E,,,historical
+1978,1.0,E,,,historical
+1979,1.0,E,,,historical
+1980,0.0,E,,,historical
+1981,0.0,E,,,historical
+1982,0.0,E,,,historical
+1983,0.0,E,,,historical
+1984,0.0,E,,,historical
+1985,0.0,E,,,historical
+1986,0.0,E,,,historical
+1987,0.0,E,,,historical
+1988,0.0,E,,,historical
+1989,0.0,E,,,historical
+1990,0.0,E,,,historical
+1991,0.0,E,,,historical
+1992,0.0,E,,,historical
+1993,0.0,E,,,historical
+1994,0.0,E,,,historical
+1995,0.0,E,,,historical
+1996,0.0,E,,,historical
+1997,0.0,E,,,historical
+1998,0.0,E,,,historical
+1999,0.0,E,,,historical
+2000,0.0,E,,,historical
+2001,0.0,E,,,historical
+2002,0.0,E,,,historical
+2003,0.0,E,,,historical
+2004,0.0,E,,,historical
+2005,0.0,E,,,historical
+2006,0.0,E,,,historical
+2007,0.0,E,,,historical
+2008,0.0,E,,,historical
+2009,0.0,E,,,historical
+2010,1.0,E,,,historical
+2011,1.0,E,,,historical
+2012,0.0,E,,,historical
+2013,2.0,E,,,historical
+2014,3.0,E,,,historical
+2015,2.0,E,,,historical
+2016,1.0,E,,,historical
+2017,1.0,E,,,historical
+2018,1.0,E,,,historical
+2019,4.0,E,,,historical
+2020,4.0,E,,,historical
+2021,6.0,E,,,historical
+2022,0.0,E,,,historical
+2013,2.0,E,0.11111111111111109,0.0,held_out_test
+2014,3.0,E,0.11111111111111109,2.0,held_out_test
+2015,2.0,E,0.11111111111111109,3.0,held_out_test
+2016,1.0,E,0.11111111111111109,2.0,held_out_test
+2017,1.0,E,0.11111111111111109,1.0,held_out_test
+2018,1.0,E,0.11111111111111109,1.0,held_out_test
+2019,4.0,E,0.11111111111111109,1.0,held_out_test
+2020,4.0,E,0.11111111111111109,4.0,held_out_test
+2021,6.0,E,0.11111111111111109,4.0,held_out_test
+2022,0.0,E,0.11111111111111109,6.0,held_out_test
+2023,,E,0.11111111111111109,,future_forecast
+2024,,E,0.11111111111111109,,future_forecast
+2025,,E,0.11111111111111109,,future_forecast
+1977,0.0,F,,,historical
+1978,0.0,F,,,historical
+1979,0.0,F,,,historical
+1980,0.0,F,,,historical
+1981,1.0,F,,,historical
+1982,0.0,F,,,historical
+1983,1.0,F,,,historical
+1984,2.0,F,,,historical
+1985,1.0,F,,,historical
+1986,1.0,F,,,historical
+1987,1.0,F,,,historical
+1988,1.0,F,,,historical
+1989,0.0,F,,,historical
+1990,1.0,F,,,historical
+1991,0.0,F,,,historical
+1992,1.0,F,,,historical
+1993,0.0,F,,,historical
+1994,2.0,F,,,historical
+1995,2.0,F,,,historical
+1996,2.0,F,,,historical
+1997,2.0,F,,,historical
+1998,3.0,F,,,historical
+1999,2.0,F,,,historical
+2000,3.0,F,,,historical
+2001,2.0,F,,,historical
+2002,0.0,F,,,historical
+2003,4.0,F,,,historical
+2004,5.0,F,,,historical
+2005,2.0,F,,,historical
+2006,12.0,F,,,historical
+2007,17.0,F,,,historical
+2008,14.0,F,,,historical
+2009,17.0,F,,,historical
+2010,21.0,F,,,historical
+2011,21.0,F,,,historical
+2012,46.0,F,,,historical
+2013,33.0,F,,,historical
+2014,37.0,F,,,historical
+2015,62.0,F,,,historical
+2016,65.0,F,,,historical
+2017,53.0,F,,,historical
+2018,32.0,F,,,historical
+2019,48.0,F,,,historical
+2020,58.0,F,,,historical
+2021,92.0,F,,,historical
+2022,1.0,F,,,historical
+2013,33.0,F,16.325396825396638,46.0,held_out_test
+2014,37.0,F,16.92706992706985,33.0,held_out_test
+2015,62.0,F,17.528743028742838,37.0,held_out_test
+2016,65.0,F,18.13041613041605,62.0,held_out_test
+2017,53.0,F,18.732089232089038,65.0,held_out_test
+2018,32.0,F,19.33376233376225,53.0,held_out_test
+2019,48.0,F,19.935435435435238,32.0,held_out_test
+2020,58.0,F,20.537108537108452,48.0,held_out_test
+2021,92.0,F,21.13878163878144,58.0,held_out_test
+2022,1.0,F,21.740454740454652,92.0,held_out_test
+2023,,F,22.34212784212764,,future_forecast
+2024,,F,22.943800943800852,,future_forecast
+2025,,F,23.54547404547384,,future_forecast
+1977,0.0,G,,,historical
+1978,0.0,G,,,historical
+1979,1.0,G,,,historical
+1980,0.0,G,,,historical
+1981,3.0,G,,,historical
+1982,2.0,G,,,historical
+1983,1.0,G,,,historical
+1984,0.0,G,,,historical
+1985,1.0,G,,,historical
+1986,2.0,G,,,historical
+1987,0.0,G,,,historical
+1988,3.0,G,,,historical
+1989,0.0,G,,,historical
+1990,0.0,G,,,historical
+1991,0.0,G,,,historical
+1992,1.0,G,,,historical
+1993,1.0,G,,,historical
+1994,2.0,G,,,historical
+1995,3.0,G,,,historical
+1996,7.0,G,,,historical
+1997,9.0,G,,,historical
+1998,9.0,G,,,historical
+1999,2.0,G,,,historical
+2000,5.0,G,,,historical
+2001,4.0,G,,,historical
+2002,5.0,G,,,historical
+2003,6.0,G,,,historical
+2004,5.0,G,,,historical
+2005,10.0,G,,,historical
+2006,10.0,G,,,historical
+2007,21.0,G,,,historical
+2008,18.0,G,,,historical
+2009,26.0,G,,,historical
+2010,53.0,G,,,historical
+2011,71.0,G,,,historical
+2012,90.0,G,,,historical
+2013,111.0,G,,,historical
+2014,110.0,G,,,historical
+2015,115.0,G,,,historical
+2016,94.0,G,,,historical
+2017,95.0,G,,,historical
+2018,78.0,G,,,historical
+2019,140.0,G,,,historical
+2020,149.0,G,,,historical
+2021,200.0,G,,,historical
+2022,6.0,G,,,historical
+2013,111.0,G,33.12222222222226,90.0,held_out_test
+2014,110.0,G,34.355555555555384,111.0,held_out_test
+2015,115.0,G,35.58888888888896,110.0,held_out_test
+2016,94.0,G,36.82222222222208,115.0,held_out_test
+2017,95.0,G,38.05555555555566,94.0,held_out_test
+2018,78.0,G,39.28888888888878,95.0,held_out_test
+2019,140.0,G,40.5222222222219,78.0,held_out_test
+2020,149.0,G,41.755555555555475,140.0,held_out_test
+2021,200.0,G,42.988888888888596,149.0,held_out_test
+2022,6.0,G,44.22222222222217,200.0,held_out_test
+2023,,G,45.45555555555529,,future_forecast
+2024,,G,46.68888888888887,,future_forecast
+2025,,G,47.92222222222199,,future_forecast
+1977,3.0,H,,,historical
+1978,6.0,H,,,historical
+1979,9.0,H,,,historical
+1980,11.0,H,,,historical
+1981,4.0,H,,,historical
+1982,7.0,H,,,historical
+1983,8.0,H,,,historical
+1984,5.0,H,,,historical
+1985,2.0,H,,,historical
+1986,1.0,H,,,historical
+1987,3.0,H,,,historical
+1988,1.0,H,,,historical
+1989,0.0,H,,,historical
+1990,0.0,H,,,historical
+1991,1.0,H,,,historical
+1992,3.0,H,,,historical
+1993,7.0,H,,,historical
+1994,9.0,H,,,historical
+1995,14.0,H,,,historical
+1996,15.0,H,,,historical
+1997,34.0,H,,,historical
+1998,20.0,H,,,historical
+1999,21.0,H,,,historical
+2000,19.0,H,,,historical
+2001,30.0,H,,,historical
+2002,34.0,H,,,historical
+2003,35.0,H,,,historical
+2004,22.0,H,,,historical
+2005,39.0,H,,,historical
+2006,52.0,H,,,historical
+2007,49.0,H,,,historical
+2008,43.0,H,,,historical
+2009,85.0,H,,,historical
+2010,114.0,H,,,historical
+2011,161.0,H,,,historical
+2012,223.0,H,,,historical
+2013,266.0,H,,,historical
+2014,248.0,H,,,historical
+2015,354.0,H,,,historical
+2016,373.0,H,,,historical
+2017,365.0,H,,,historical
+2018,369.0,H,,,historical
+2019,413.0,H,,,historical
+2020,541.0,H,,,historical
+2021,582.0,H,,,historical
+2022,9.0,H,,,historical
+2013,266.0,H,88.7539682539682,223.0,held_out_test
+2014,248.0,H,91.91484341484284,266.0,held_out_test
+2015,354.0,H,95.07571857571838,248.0,held_out_test
+2016,373.0,H,98.23659373659393,354.0,held_out_test
+2017,365.0,H,101.39746889746857,373.0,held_out_test
+2018,369.0,H,104.55834405834412,365.0,held_out_test
+2019,413.0,H,107.71921921921876,369.0,held_out_test
+2020,541.0,H,110.8800943800943,413.0,held_out_test
+2021,582.0,H,114.04096954096894,541.0,held_out_test
+2022,9.0,H,117.2018447018445,582.0,held_out_test
+2023,,H,120.36271986272004,,future_forecast
+2024,,H,123.52359502359468,,future_forecast
+2025,,H,126.68447018447023,,future_forecast
