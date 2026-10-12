@@ -203,6 +203,123 @@ def classification(df: pd.DataFrame) -> None:
     print(f"[classification] train={len(train_index):,}; test={len(test_index):,}; selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
 
 
+def chronological_classification(df: pd.DataFrame) -> None:
+    """Evaluate a frozen 2013 information-cutoff model on later cohorts."""
+    labelled = df.dropna(subset=["is_highly_cited"]).copy()
+    train = labelled[labelled["pub_year"].between(2000, 2010)].copy()
+    test = labelled[labelled["pub_year"].between(2011, 2013)].copy()
+    if train.empty or test.empty:
+        raise ValueError("The warehouse does not contain the required 2000-2013 chronological cohorts.")
+    numeric = NUMERIC  # family_size is retained only for comparison and flagged below.
+    x_train, y_train = train[numeric + CATEGORICAL], train["is_highly_cited"].astype(int)
+    x_test, y_test = test[numeric + CATEGORICAL], test["is_highly_cited"].astype(int)
+    print(f"[chronological] information cutoff=end-2013; train publications=2000-2010 ({len(train):,}, classes={y_train.value_counts().sort_index().to_dict()}); test publications=2011-2013 ({len(test):,}, classes={y_test.value_counts().sort_index().to_dict()})")
+    svm_prep = ColumnTransformer([
+        ("num", Pipeline([( "impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), numeric),
+        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
+    ])
+    hgb_prep = ColumnTransformer([
+        ("num", SimpleImputer(strategy="median"), numeric),
+        ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL),
+    ])
+    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
+    experiments = {
+        "chronological_log_numeric_svm": (Pipeline([( "prepare", svm_prep), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [0.5, 1.0], "model__gamma": ["scale", 0.01]}, "log1p/scaled numeric + grouped one-hot categorical"),
+        "chronological_hgb": (Pipeline([( "prepare", hgb_prep), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(numeric) + [True] * len(CATEGORICAL), max_iter=100, random_state=SEED))]), {"model__max_leaf_nodes": [3, 7], "model__l2_regularization": [0.0, 1.0]}, "median numeric + native categorical boosting"),
+    }
+    rows, fitted = [], {}
+    for name, (pipeline, grid, preprocessing) in experiments.items():
+        search = GridSearchCV(pipeline, grid, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
+        search.fit(x_train, y_train)
+        model = search.best_estimator_; pred = model.predict(x_test)
+        score = model.predict_proba(x_test)[:, 1] if hasattr(model, "predict_proba") else model.decision_function(x_test)
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "train_publication_years": "2000-2010", "test_publication_years": "2011-2013", "training_label_observable_by": "end-2013", "test_label_observable_by": "end-2016", "train_records": len(train), "test_records": len(test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": search.best_score_, "cv_f1_mean": search.cv_results_["mean_test_f1"][search.best_index_], "feature_preprocessing": preprocessing, "selected_hyperparameters": str(search.best_params_), "timing_note": "family_size retained for comparability but timing-uncertain; citation-window fields excluded"})
+        fitted[name] = (pred, score)
+        print(f"[chronological] {name}: CV accuracy={search.best_score_:.3f}; test accuracy={rows[-1]['accuracy']:.3f}")
+    selected_name = max(rows, key=lambda row: (row["cv_accuracy_mean"], row["cv_f1_mean"]))["model"]
+    for row in rows: row["selected_by_training_cv"] = row["model"] == selected_name
+    selected_pred, selected_score = fitted[selected_name]
+    pd.DataFrame(rows).sort_values("model").to_csv(OUT / "chronological_classification_metrics.csv", index=False)
+    pd.DataFrame({"pn": test["pn"].values, "pub_year": test["pub_year"].values, "actual_label": y_test.values, "predicted_label": selected_pred, "predicted_score": selected_score, "selected_model": selected_name}).to_csv(OUT / "chronological_classification_predictions.csv", index=False)
+    cm = confusion_matrix(y_test, selected_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(5, 4)); image = ax.imshow(cm, cmap="Blues")
+    for (row, col), value in np.ndenumerate(cm): ax.text(col, row, str(value), ha="center", va="center")
+    ax.set(xticks=[0, 1], yticks=[0, 1], xticklabels=["Not highly cited", "Highly cited"], yticklabels=["Not highly cited", "Highly cited"], xlabel="Predicted label", ylabel="Actual label", title=f"Chronological: {selected_name.replace('_', ' ').title()}")
+    fig.colorbar(image, ax=ax, label="Patent count"); fig.tight_layout(); fig.savefig(OUT / "chronological_classification_confusion_matrix.png", dpi=160); plt.close(fig)
+    chosen = next(row for row in rows if row["model"] == selected_name)
+    print(f"[chronological] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
+
+
+def svm_optimization_experiment(df: pd.DataFrame) -> None:
+    """Run a separate, training-CV-selected SVM experiment on the fixed random split."""
+    labelled = df.dropna(subset=["is_highly_cited"]).copy()
+    x, y = labelled[NUMERIC + CATEGORICAL], labelled["is_highly_cited"].astype(int)
+    x_train, x_test, y_train, y_test, _, id_test = train_test_split(
+        x, y, labelled["pn"], test_size=0.20, random_state=SEED, stratify=y
+    )
+    print("[svm] paper mapping: VC=ipc_count; FM=family_size (timing-uncertain); PG=pages; CL=claims; VTciting=backward_citations; NPL=npl_count; IV=inventors. Missing: IPC novelty/combination at paper granularity, figures, cited-patent IPC diversity/novelty, science-citation indicators, and inventor history.")
+    print(f"[svm] fixed random split: train={len(x_train):,} ({y_train.value_counts().sort_index().to_dict()}), test={len(x_test):,} ({y_test.value_counts().sort_index().to_dict()})")
+
+    def make_prep(log_numeric: bool):
+        numeric_steps = [("impute", SimpleImputer(strategy="median"))]
+        if log_numeric:
+            numeric_steps.append(("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")))
+        numeric_steps.append(("scale", StandardScaler()))
+        return ColumnTransformer([
+            ("num", Pipeline(numeric_steps), NUMERIC),
+            ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
+        ])
+
+    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
+    # Tune the primary log-numeric RBF SVM; keep the two direct ablations fixed
+    # so the focused experiment remains practical for the review environment.
+    variants = {
+        "svm_rbf_standard_unweighted": (Pipeline([( "prepare", make_prep(False)), ("model", SVC(kernel="rbf", C=1.0, gamma="scale", random_state=SEED))]), {}, "standard numeric preprocessing; class_weight=unweighted"),
+        "svm_rbf_log_numeric_unweighted": (Pipeline([( "prepare", make_prep(True)), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [0.5, 1.0], "model__gamma": ["scale", 0.01]}, "log-numeric preprocessing; class_weight=unweighted"),
+        "svm_rbf_log_numeric_balanced": (Pipeline([( "prepare", make_prep(True)), ("model", SVC(kernel="rbf", C=1.0, gamma="scale", class_weight="balanced", random_state=SEED))]), {}, "log-numeric preprocessing; class_weight=balanced"),
+    }
+    rows, models = [], {}
+    for name, (pipeline, grid, note) in variants.items():
+        search = GridSearchCV(pipeline, grid, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
+        search.fit(x_train, y_train)
+        model = search.best_estimator_; pred = model.predict(x_test); score = model.decision_function(x_test)
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "candidate_type": "SVM tuned by training CV", "train_records": len(x_train), "test_records": len(x_test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": search.best_score_, "cv_f1_mean": search.cv_results_["mean_test_f1"][search.best_index_], "preprocessing": note, "selected_hyperparameters": str(search.best_params_) if grid else "fixed C=1.0, gamma=scale", "timing_note": "family_size timing-uncertain; all citation-window outcome fields excluded"})
+        models[name] = (model, pred, score)
+        print(f"[svm] {name}: CV accuracy={search.best_score_:.3f}; test accuracy={rows[-1]['accuracy']:.3f}")
+
+    # Existing non-SVM baselines evaluated on exactly the same held-out records.
+    hgb_prep = ColumnTransformer([("num", SimpleImputer(strategy="median"), NUMERIC), ("cat", Pipeline([( "impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL)])
+    comparators = {
+        "majority_baseline": (Pipeline([( "prepare", make_prep(True)), ("model", DummyClassifier(strategy="most_frequent"))]), "Majority-class baseline"),
+        "baseline_hgb": (Pipeline([( "prepare", hgb_prep), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(NUMERIC) + [True] * len(CATEGORICAL), max_iter=100, max_leaf_nodes=7, l2_regularization=0.0, random_state=SEED))]), "Existing HGB configuration"),
+        "baseline_random_forest": (Pipeline([( "prepare", make_prep(True)), ("model", RandomForestClassifier(n_estimators=300, min_samples_leaf=2, max_features="sqrt", class_weight="balanced", random_state=SEED, n_jobs=1))]), "Existing class-weighted RF configuration"),
+    }
+    for name, (model, note) in comparators.items():
+        model.fit(x_train, y_train); pred = model.predict(x_test)
+        score = model.predict_proba(x_test)[:, 1] if hasattr(model, "predict_proba") else model.decision_function(x_test)
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "candidate_type": "Fixed existing comparator", "train_records": len(x_train), "test_records": len(x_test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": np.nan, "cv_f1_mean": np.nan, "preprocessing": note, "selected_hyperparameters": "fixed existing configuration", "timing_note": "family_size timing-uncertain; all citation-window outcome fields excluded"})
+
+    selected_name = max((row for row in rows if row["candidate_type"] == "SVM tuned by training CV"), key=lambda row: (row["cv_accuracy_mean"], row["cv_f1_mean"]))["model"]
+    for row in rows: row["selected_by_training_cv"] = row["model"] == selected_name
+    selected_model, selected_pred, selected_score = models[selected_name]
+    pd.DataFrame(rows).sort_values("model").to_csv(OUT / "svm_optimization_metrics.csv", index=False)
+    pd.DataFrame({"pn": id_test.values, "actual_label": y_test.values, "predicted_label": selected_pred, "decision_score": selected_score, "selected_model": selected_name}).to_csv(OUT / "svm_optimization_predictions.csv", index=False)
+    cm = confusion_matrix(y_test, selected_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(5, 4)); image = ax.imshow(cm, cmap="Blues")
+    for (row, col), value in np.ndenumerate(cm): ax.text(col, row, str(value), ha="center", va="center")
+    ax.set(xticks=[0, 1], yticks=[0, 1], xticklabels=["Not highly cited", "Highly cited"], yticklabels=["Not highly cited", "Highly cited"], xlabel="Predicted label", ylabel="Actual label", title=f"Tuned SVM: {selected_name.replace('_', ' ').title()}")
+    fig.colorbar(image, ax=ax, label="Patent count"); fig.tight_layout(); fig.savefig(OUT / "svm_optimization_confusion_matrix.png", dpi=160); plt.close(fig)
+    comparison = pd.DataFrame(rows).sort_values("accuracy")
+    fig, ax = plt.subplots(figsize=(9, 5)); ax.barh(comparison["model"], comparison["accuracy"], color="#4472c4")
+    ax.axvline(.861, color="#c55a11", linestyle="--", label="Paper SVM reference (non-equivalent)")
+    ax.set(title="Focused SVM Experiment: Held-out Accuracy", xlabel="Accuracy", ylabel="Model"); ax.legend(); fig.tight_layout(); fig.savefig(OUT / "svm_optimization_comparison.png", dpi=160); plt.close(fig)
+    chosen = next(row for row in rows if row["model"] == selected_name)
+    print(f"[svm] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
+
+
 def clustering(df: pd.DataFrame) -> None:
     # Excludes citation outcomes and all impact labels to keep clusters structural/technological.
     x = df[NUMERIC + CATEGORICAL]
@@ -319,19 +436,27 @@ def prediction(df: pd.DataFrame) -> None:
     ax.legend(); fig.tight_layout(); fig.savefig(OUT / "patent_trend_forecast.png", dpi=160); plt.close(fig)
 
 
-def main(classification_only: bool = False) -> None:
+def main(classification_only: bool = False, chronological_only: bool = False, svm_optimization_only: bool = False) -> None:
     if not DB.exists() or not RAW.exists():
         raise FileNotFoundError("Both data/warehouse/patentpulse.db and data/raw/dataset.xlsx are required.")
     OUT.mkdir(exist_ok=True)
     df = warehouse_data()
     print(f"[validation] warehouse patents={len(df):,}; labelled={df.is_highly_cited.notna().sum():,}; highly cited={df.is_highly_cited.sum():.0f}")
-    classification(df)
-    if not classification_only:
+    if svm_optimization_only:
+        svm_optimization_experiment(df)
+    elif chronological_only:
+        chronological_classification(df)
+    else:
+        classification(df)
+    if not classification_only and not chronological_only and not svm_optimization_only:
         clustering(df); rules(); prediction(df)
-    print(f"[complete] {'Classification' if classification_only else 'Review 2'} outputs saved to {OUT}")
+    mode = "Focused SVM optimization" if svm_optimization_only else ("Chronological classification" if chronological_only else ("Classification" if classification_only else "Review 2"))
+    print(f"[complete] {mode} outputs saved to {OUT}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run PatentPulse Review 2 experiments.")
     parser.add_argument("--classification-only", action="store_true", help="Update classification outputs without rerunning other mining tasks.")
+    parser.add_argument("--chronological-only", action="store_true", help="Run the separate chronological classification experiment only.")
+    parser.add_argument("--svm-optimization-only", action="store_true", help="Run the focused SVM optimization experiment only.")
     main(**vars(parser.parse_args()))
