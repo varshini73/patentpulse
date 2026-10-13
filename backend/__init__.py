@@ -1,0 +1,1 @@
+"""PatentPulse FastAPI service."""

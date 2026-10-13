@@ -1,3 +1,3 @@
 cluster_id,patents,avg_pages,avg_claims,avg_inventors,avg_family_size,avg_backward_citations,dominant_ipc_section,selected_k,silhouette_score
-0,13632,17.806,16.608,2.744,5.441,13.601,B,2,0.763
-1,100,49.152,21.4,2.98,10.69,305.39,H,2,0.763
+0,13641,17.821,16.61,2.744,5.452,13.773,B,2,0.768
+1,91,50.2,21.538,3.011,9.516,308.429,H,2,0.768

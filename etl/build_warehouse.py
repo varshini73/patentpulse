@@ -1,9 +1,8 @@
-"""PatentPulse ETL: S1 File (xlsx) -> SQLite star schema."""
 import sqlite3
 from pathlib import Path
 
 try:
-    import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+    import pandas as pd 
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "pandas is required. Install the project dependencies first: pip install -r requirements.txt"

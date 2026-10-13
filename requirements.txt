@@ -1,0 +1,12 @@
+pandas
+openpyxl
+numpy
+scikit-learn
+matplotlib
+mlxtend
+joblib
+plotly
+streamlit
+fastapi
+uvicorn
+pymupdf

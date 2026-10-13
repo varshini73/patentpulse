@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import argparse
+import json
 from collections import Counter
 from itertools import combinations
 from pathlib import Path
@@ -31,13 +32,16 @@ from sklearn.metrics import (accuracy_score, average_precision_score, confusion_
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, OrdinalEncoder, StandardScaler
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.svm import SVC
+import joblib
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "warehouse" / "patentpulse.db"
 RAW = ROOT / "data" / "raw" / "dataset.xlsx"
 OUT = ROOT / "outputs"
+MODELS = ROOT / "models"
 SEED = 2026
 NUMERIC = ["pages", "claims", "inventors", "family_size", "npl_count", "backward_citations", "ipc_count"]
 CATEGORICAL = ["country_code", "kind_code", "ipc_subclass"]
@@ -401,6 +405,89 @@ def paper_aligned_svm_experiment(df: pd.DataFrame) -> None:
     print(f"[paper-svm] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; test accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
 
 
+def benchmark_classification_experiment(df: pd.DataFrame) -> None:
+    """Run one focused, reproducible benchmark and persist its CV-selected model.
+
+    The selected artifact is an inference pipeline: all imputing, transforms and
+    encoders are contained within it.  The fixed test partition remains untouched
+    until the final evaluation below.
+    """
+    data = enriched_classification_data(df).dropna(subset=["is_highly_cited"]).copy()
+    y = data["is_highly_cited"].astype(int)
+    # Family size is deliberately excluded because the workbook does not document
+    # when it was observed. Backward citations are retained as an analytic input
+    # but flagged for deployment because their observation timing is also unknown.
+    # Keep the deployed benchmark user-enterable: title/abstract lengths can be
+    # derived from form text, unlike retrospective inventor/IP C history.
+    numeric = SAFE_NUMERIC + ["title_word_count", "abstract_word_count", "pub_year"]
+    features = numeric + CATEGORICAL
+    x_train, x_test, y_train, y_test, id_train, id_test = train_test_split(
+        data[features], y, data["pn"], test_size=0.20, random_state=SEED, stratify=y
+    )
+    cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=SEED)
+    print(f"[benchmark] features={features}")
+    print(f"[benchmark] fixed split train={len(x_train):,} ({y_train.value_counts().sort_index().to_dict()}), test={len(x_test):,} ({y_test.value_counts().sort_index().to_dict()})")
+
+    def onehot_prep() -> ColumnTransformer:
+        return ColumnTransformer([
+            ("num", Pipeline([("impute", SimpleImputer(strategy="median")), ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")), ("scale", StandardScaler())]), numeric),
+            ("cat", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=5))]), CATEGORICAL),
+        ])
+
+    def hgb_prep() -> ColumnTransformer:
+        return ColumnTransformer([
+            ("num", SimpleImputer(strategy="median"), numeric),
+            ("cat", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan, encoded_missing_value=np.nan))]), CATEGORICAL),
+        ])
+
+    candidates = {
+        "majority_baseline": (Pipeline([("prepare", onehot_prep()), ("model", DummyClassifier(strategy="most_frequent"))]), [{}], "majority class"),
+        # The earlier focused search selected C=1, gamma=scale; keep this
+        # benchmark independent of test data and avoid re-running a broad grid.
+        "rbf_svm": (Pipeline([("prepare", onehot_prep()), ("model", SVC(kernel="rbf", random_state=SEED))]), {"model__C": [1.0], "model__gamma": ["scale"]}, "RBF SVM; log1p/scaled numeric + one-hot categorical"),
+        "random_forest_balanced": (Pipeline([("prepare", onehot_prep()), ("model", RandomForestClassifier(n_estimators=300, class_weight="balanced", max_features="sqrt", random_state=SEED, n_jobs=1))]), {"model__min_samples_leaf": [1, 2]}, "class-weighted random forest"),
+        "hist_gradient_boosting": (Pipeline([("prepare", hgb_prep()), ("model", HistGradientBoostingClassifier(categorical_features=[False] * len(numeric) + [True] * len(CATEGORICAL), max_iter=150, random_state=SEED))]), {"model__max_leaf_nodes": [7, 15], "model__l2_regularization": [0.0, 1.0]}, "native-categorical histogram gradient boosting"),
+        "mlp_tabular": (Pipeline([("prepare", onehot_prep()), ("model", MLPClassifier(hidden_layer_sizes=(32, 16), alpha=0.001, learning_rate_init=0.001, early_stopping=True, validation_fraction=0.15, n_iter_no_change=12, max_iter=250, random_state=SEED))]), {"model__alpha": [0.0005, 0.002]}, "MLP (32,16), early stopping and L2 regularization"),
+    }
+    rows, fitted = [], {}
+    for name, (pipeline, grid, description) in candidates.items():
+        search = GridSearchCV(pipeline, grid, scoring={"accuracy": "accuracy", "f1": "f1"}, refit="accuracy", cv=cv, n_jobs=1)
+        search.fit(x_train, y_train)
+        model = search.best_estimator_
+        pred = model.predict(x_test)
+        score = model.predict_proba(x_test)[:, 1] if hasattr(model, "predict_proba") else model.decision_function(x_test)
+        tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+        rows.append({"model": name, "train_records": len(x_train), "test_records": len(x_test), "positive_train": int(y_train.sum()), "positive_test": int(y_test.sum()), "accuracy": accuracy_score(y_test, pred), "precision": precision_score(y_test, pred, zero_division=0), "recall": recall_score(y_test, pred, zero_division=0), "f1": f1_score(y_test, pred, zero_division=0), "macro_f1": f1_score(y_test, pred, average="macro", zero_division=0), "weighted_f1": f1_score(y_test, pred, average="weighted", zero_division=0), "roc_auc": roc_auc_score(y_test, score), "pr_auc": average_precision_score(y_test, score), "tn": tn, "fp": fp, "fn": fn, "tp": tp, "cv_accuracy_mean": search.best_score_, "cv_f1_mean": search.cv_results_["mean_test_f1"][search.best_index_], "features": ", ".join(features), "preprocessing_and_model": description, "selected_hyperparameters": str(search.best_params_), "timing_note": "family_size excluded; backward_citations timing is unverified; forward citations, cited_3yr and target excluded"})
+        fitted[name] = (model, pred, score)
+        print(f"[benchmark] {name}: CV accuracy={search.best_score_:.3f}; held-out accuracy={rows[-1]['accuracy']:.3f}")
+
+    # Accuracy is primary for the paper comparison. Positive-class F1 resolves a CV tie.
+    selected_name = max(rows, key=lambda row: (row["cv_accuracy_mean"], row["cv_f1_mean"]))["model"]
+    for row in rows:
+        row["selected_by_training_cv"] = row["model"] == selected_name
+    selected_model, selected_pred, selected_score = fitted[selected_name]
+    MODELS.mkdir(exist_ok=True)
+    artifact = {"model": selected_model, "features": features, "numeric_features": numeric,
+                "categorical_features": CATEGORICAL, "selected_model": selected_name,
+                "split": {"test_size": 0.20, "random_state": SEED, "stratified": True},
+                "timing_note": "family_size excluded; backward_citations timing is unverified"}
+    joblib.dump(artifact, MODELS / "classification_benchmark_model.joblib")
+    (MODELS / "classification_benchmark_metadata.json").write_text(json.dumps({k: v for k, v in artifact.items() if k != "model"}, indent=2), encoding="utf-8")
+    pd.DataFrame(rows).sort_values("model").to_csv(OUT / "classification_benchmark_metrics.csv", index=False)
+    pd.DataFrame({"pn": id_test.values, "actual_label": y_test.values, "predicted_label": selected_pred, "predicted_probability": selected_score, "selected_model": selected_name}).to_csv(OUT / "classification_benchmark_predictions.csv", index=False)
+    cm = confusion_matrix(y_test, selected_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(5, 4)); image = ax.imshow(cm, cmap="Greys")
+    for (row, col), value in np.ndenumerate(cm): ax.text(col, row, str(value), ha="center", va="center")
+    ax.set(xticks=[0, 1], yticks=[0, 1], xticklabels=["Not highly cited", "Highly cited"], yticklabels=["Not highly cited", "Highly cited"], xlabel="Predicted label", ylabel="Actual label", title=f"Benchmark: {selected_name.replace('_', ' ').title()}")
+    fig.colorbar(image, ax=ax, label="Patent count"); fig.tight_layout(); fig.savefig(OUT / "classification_benchmark_confusion_matrix.png", dpi=160); plt.close(fig)
+    comparison = pd.DataFrame(rows).sort_values("accuracy")
+    fig, ax = plt.subplots(figsize=(9, 5)); ax.barh(comparison["model"], comparison["accuracy"], color="#202020")
+    ax.axvline(.861, color="#777777", linestyle="--", label="Paper SVM reference (non-equivalent)")
+    ax.set(title="Leakage-safe Classification Benchmark", xlabel="Held-out accuracy", ylabel="Model"); ax.legend(); fig.tight_layout(); fig.savefig(OUT / "classification_benchmark_comparison.png", dpi=160); plt.close(fig)
+    chosen = next(row for row in rows if row["model"] == selected_name)
+    print(f"[benchmark] selected={selected_name}; CV accuracy={chosen['cv_accuracy_mean']:.3f}; held-out accuracy={chosen['accuracy']:.3f}; F1={chosen['f1']:.3f}")
+
+
 def clustering(df: pd.DataFrame) -> None:
     # Excludes citation outcomes and all impact labels to keep clusters structural/technological.
     x = df[NUMERIC + CATEGORICAL]
@@ -518,7 +605,7 @@ def prediction(df: pd.DataFrame) -> None:
 
 
 def main(classification_only: bool = False, chronological_only: bool = False, svm_optimization_only: bool = False,
-         paper_aligned_svm_only: bool = False) -> None:
+         paper_aligned_svm_only: bool = False, benchmark_only: bool = False) -> None:
     if not DB.exists() or not RAW.exists():
         raise FileNotFoundError("Both data/warehouse/patentpulse.db and data/raw/dataset.xlsx are required.")
     OUT.mkdir(exist_ok=True)
@@ -528,13 +615,15 @@ def main(classification_only: bool = False, chronological_only: bool = False, sv
         svm_optimization_experiment(df)
     elif paper_aligned_svm_only:
         paper_aligned_svm_experiment(df)
+    elif benchmark_only:
+        benchmark_classification_experiment(df)
     elif chronological_only:
         chronological_classification(df)
     else:
         classification(df)
-    if not classification_only and not chronological_only and not svm_optimization_only and not paper_aligned_svm_only:
+    if not classification_only and not chronological_only and not svm_optimization_only and not paper_aligned_svm_only and not benchmark_only:
         clustering(df); rules(); prediction(df)
-    mode = "Paper-aligned SVM experiment" if paper_aligned_svm_only else ("Focused SVM optimization" if svm_optimization_only else ("Chronological classification" if chronological_only else ("Classification" if classification_only else "Review 2")))
+    mode = "Classification benchmark" if benchmark_only else ("Paper-aligned SVM experiment" if paper_aligned_svm_only else ("Focused SVM optimization" if svm_optimization_only else ("Chronological classification" if chronological_only else ("Classification" if classification_only else "Review 2"))))
     print(f"[complete] {mode} outputs saved to {OUT}")
 
 
@@ -544,4 +633,5 @@ if __name__ == "__main__":
     parser.add_argument("--chronological-only", action="store_true", help="Run the separate chronological classification experiment only.")
     parser.add_argument("--svm-optimization-only", action="store_true", help="Run the focused SVM optimization experiment only.")
     parser.add_argument("--paper-aligned-svm-only", action="store_true", help="Run the separate paper-aligned SVM experiment only.")
+    parser.add_argument("--benchmark-only", action="store_true", help="Run the reusable leakage-safe classification benchmark only.")
     main(**vars(parser.parse_args()))
