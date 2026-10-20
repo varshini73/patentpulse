@@ -1,0 +1,32 @@
+{
+  "cohort": "published 2000-2016, cited >=10 in three years",
+  "counts": {
+    "C0": 997,
+    "C1": 86,
+    "C2": 66
+  },
+  "paper_protocol": "paper reports 80/20 random train/test; seed and full tuning unavailable",
+  "available_features": [
+    "VC_ipc_count_approx",
+    "FM_family_size",
+    "PG_pages",
+    "CL_claims",
+    "NPL_count",
+    "IV_inventors",
+    "VTciting_proxy"
+  ],
+  "unavailable_paper_features": [
+    "bottom-level IPC novelty/combinations",
+    "figures",
+    "cited-patent IPC diversity/novelty",
+    "Web of Science/JCR science-citation features",
+    "verified inventor-history VPaverage"
+  ],
+  "important_limitation": "C0 is 997/1149 (86.77%); accuracy close to this majority baseline does not demonstrate strong C1/C2 discrimination.",
+  "timing_limitation": "Family size and NUMBER OF CITATION are retained only as retrospective workbook fields; their values at the intended prediction time are not verified. TCciting is a non-equivalent proxy for the paper's cited-patent IPC indicator.",
+  "paper_reported_reference": {
+    "SVM": 0.861,
+    "Random Forest": 0.852,
+    "XGBoost": 0.839
+  }
+}

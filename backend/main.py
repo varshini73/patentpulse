@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import sqlite3
@@ -125,12 +126,16 @@ def demo_results() -> dict[str, Any]:
     deployed = pd.read_csv(OUT / "model_optimization" / "model_leaderboard.csv")
     chronological_path = OUT / "chronological_classification_metrics.csv"
     chronological = pd.read_csv(chronological_path) if chronological_path.exists() else pd.DataFrame()
+    tier_metrics_path = OUT / "v3" / "three_tier_metrics.csv"
+    tier_metadata_path = OUT / "v3" / "three_tier_protocol_metadata.json"
+    tier_metrics = pd.read_csv(tier_metrics_path) if tier_metrics_path.exists() else pd.DataFrame()
+    tier_metadata = json.loads(tier_metadata_path.read_text(encoding="utf-8")) if tier_metadata_path.exists() else {}
     paper = [
         {"model": "SVM", "accuracy": 0.861, "status": "Reported by Han et al. (2022); not reproduced here"},
         {"model": "Random Forest", "accuracy": 0.852, "status": "Reported by Han et al. (2022); not reproduced here"},
         {"model": "XGBoost", "accuracy": 0.839, "status": "Reported by Han et al. (2022); not reproduced here"},
     ]
-    return {"paper_reference": paper, "paper_note": "This is a different three-tier classification task. The reported figures are contextual references, not PatentPulse measurements. With an imbalanced tier dataset, accuracy near a majority baseline would not establish good tier discrimination.", "binary_research_benchmark": benchmark.to_dict(orient="records"), "binary_deployed_pdf_model": deployed.to_dict(orient="records"), "chronological": chronological.to_dict(orient="records")}
+    return {"paper_reference": paper, "paper_note": "This is a different three-tier classification task. The reported figures are contextual references, not PatentPulse measurements. With an imbalanced tier dataset, accuracy near a majority baseline would not establish good tier discrimination.", "three_tier_protocol": tier_metrics.to_dict(orient="records"), "three_tier_metadata": tier_metadata, "binary_research_benchmark": benchmark.to_dict(orient="records"), "binary_deployed_pdf_model": deployed.to_dict(orient="records"), "chronological": chronological.to_dict(orient="records")}
 
 
 @app.post("/api/patents/extract")
