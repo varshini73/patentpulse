@@ -1,0 +1,39 @@
+{
+  "features": [
+    "pages",
+    "claims",
+    "inventors",
+    "npl_count",
+    "backward_citations",
+    "ipc_count",
+    "title_word_count",
+    "abstract_word_count",
+    "pub_year",
+    "country_code",
+    "kind_code",
+    "ipc_subclass"
+  ],
+  "numeric_features": [
+    "pages",
+    "claims",
+    "inventors",
+    "npl_count",
+    "backward_citations",
+    "ipc_count",
+    "title_word_count",
+    "abstract_word_count",
+    "pub_year"
+  ],
+  "categorical_features": [
+    "country_code",
+    "kind_code",
+    "ipc_subclass"
+  ],
+  "selected_model": "hist_gradient_boosting",
+  "split": {
+    "test_size": 0.2,
+    "random_state": 2026,
+    "stratified": true
+  },
+  "timing_note": "family_size excluded; backward_citations timing is unverified"
+}

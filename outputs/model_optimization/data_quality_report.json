@@ -1,0 +1,31 @@
+{
+  "rows_total": 13732,
+  "labelled_rows": 5665,
+  "positive": 1149,
+  "raw_columns": 17,
+  "duplicate_pn": 0,
+  "target_definition": "pub_year 2000-2016 and cited_3yr >= 10",
+  "missingness": {
+    "pages": 0.0,
+    "claims": 0.0,
+    "inventors": 0.0002,
+    "npl_count": 0.0,
+    "ipc_count": 0.0,
+    "pub_year": 0.0,
+    "country_code": 0.0,
+    "kind_code": 0.0,
+    "ipc_subclass": 0.0
+  },
+  "cardinality": {
+    "country_code": 43,
+    "kind_code": 4,
+    "ipc_subclass": 190
+  },
+  "selected_model": "deployable_hgb_v2",
+  "selection_rule": "highest 3-fold training-CV accuracy, PR-AUC tie break",
+  "versions": {
+    "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.26220-SP0",
+    "pandas": "3.0.5"
+  }
+}

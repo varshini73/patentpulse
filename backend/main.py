@@ -4,6 +4,7 @@ import io
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "warehouse" / "patentpulse.db"
 RAW = ROOT / "data" / "raw" / "dataset.xlsx"
 OUT = ROOT / "outputs"
-MODEL_FILE = ROOT / "models" / "classification_benchmark_model.joblib"
+MODEL_FILE = ROOT / "models" / "document_model_v2.joblib"
+if not MODEL_FILE.exists():
+    MODEL_FILE = ROOT / "models" / "classification_benchmark_model.joblib"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 app = FastAPI(title="PatentPulse API", version="2.0.0")
@@ -110,8 +113,24 @@ def summary() -> dict[str, Any]:
 @app.get("/api/models")
 def models() -> dict[str, Any]:
     artifact = model_artifact()
-    metrics = pd.read_csv(OUT / "classification_benchmark_metrics.csv")
+    optimized = OUT / "model_optimization" / "model_leaderboard.csv"
+    metrics = pd.read_csv(optimized if optimized.exists() else OUT / "classification_benchmark_metrics.csv")
     return {"selected_model": artifact["selected_model"], "features": artifact["features"], "timing_note": artifact["timing_note"], "metrics": metrics.to_dict(orient="records")}
+
+
+@app.get("/api/demo-results")
+def demo_results() -> dict[str, Any]:
+    """Keep paper-reference numbers separate from verified PatentPulse outputs."""
+    benchmark = pd.read_csv(OUT / "classification_benchmark_metrics.csv")
+    deployed = pd.read_csv(OUT / "model_optimization" / "model_leaderboard.csv")
+    chronological_path = OUT / "chronological_classification_metrics.csv"
+    chronological = pd.read_csv(chronological_path) if chronological_path.exists() else pd.DataFrame()
+    paper = [
+        {"model": "SVM", "accuracy": 0.861, "status": "Reported by Han et al. (2022); not reproduced here"},
+        {"model": "Random Forest", "accuracy": 0.852, "status": "Reported by Han et al. (2022); not reproduced here"},
+        {"model": "XGBoost", "accuracy": 0.839, "status": "Reported by Han et al. (2022); not reproduced here"},
+    ]
+    return {"paper_reference": paper, "paper_note": "This is a different three-tier classification task. The reported figures are contextual references, not PatentPulse measurements. With an imbalanced tier dataset, accuracy near a majority baseline would not establish good tier discrimination.", "binary_research_benchmark": benchmark.to_dict(orient="records"), "binary_deployed_pdf_model": deployed.to_dict(orient="records"), "chronological": chronological.to_dict(orient="records")}
 
 
 @app.post("/api/patents/extract")
@@ -140,17 +159,25 @@ def predict(payload: PatentFeatures) -> dict[str, Any]:
     artifact = model_artifact()
     values = payload.model_dump()
     warnings = []
-    for field in ["publication_year", "pages", "claims", "inventors", "npl_count", "backward_citations", "ipc_count", "country_code", "kind_code", "ipc_subclass"]:
+    model_fields = artifact["features"]
+    field_map = {"publication_year": "pub_year"}
+    required_inputs = [next((source for source, target in field_map.items() if target == field), field) for field in model_fields if field not in {"title_word_count", "abstract_word_count", "text"}]
+    for field in required_inputs:
         if values[field] is None:
             warnings.append(f"{field} is missing; the training-time imputer will handle it, so prediction confidence may be lower.")
-    values["title_word_count"] = len(values.pop("title").split())
-    values["abstract_word_count"] = len(values.pop("abstract").split())
+    title = values.pop("title")
+    abstract = values.pop("abstract")
+    values["title_word_count"] = len(title.split())
+    values["abstract_word_count"] = len(abstract.split())
     values["pub_year"] = values.pop("publication_year")
-    frame = pd.DataFrame([values])[artifact["features"]]
+    if "text" in model_fields:
+        values["text"] = f"{title} {abstract}"
+    frame = pd.DataFrame([values])[model_fields]
     model = artifact["model"]
     probability = float(model.predict_proba(frame)[0, 1])
     label = int(model.predict(frame)[0])
-    return {"predicted_class": label, "meaning": "Predicted highly cited (>=10 forward citations within three years)" if label else "Predicted not highly cited", "probability_highly_cited": probability, "model": artifact["selected_model"], "model_version": "benchmark-2026", "features_used": frame.iloc[0].where(frame.iloc[0].notna(), None).to_dict(), "warnings": warnings + ["Probability is an estimate, not a guarantee. The historical target was measured over three years; new patents may differ from the study cohort.", artifact["timing_note"]]}
+    supplied = sum(value is not None and value != "" for value in frame.iloc[0])
+    return {"predicted_class": label, "meaning": "Predicted highly cited (>=10 forward citations within three years)" if label else "Predicted not highly cited", "probability_highly_cited": probability, "model": artifact["selected_model"], "model_version": artifact.get("model_version", "benchmark-2026"), "prediction_timestamp": datetime.now(timezone.utc).isoformat(), "data_completeness": supplied / len(frame.columns), "features_used": frame.iloc[0].where(frame.iloc[0].notna(), None).to_dict(), "warnings": warnings + ["Probability is an estimate, not a guarantee. The historical target was measured over three years; new patents may differ from the study cohort.", artifact["timing_note"]]}
 
 
 @app.get("/api/analytics/overview")
@@ -166,7 +193,7 @@ def analytics_overview(year_start: int | None = None, year_end: int | None = Non
 
 @app.get("/api/analytics/{name}")
 def analytics_file(name: str) -> list[dict[str, Any]]:
-    files = {"classification": "classification_benchmark_metrics.csv", "clusters": "cluster_summary.csv", "association-rules": "association_rules.csv", "forecast": "forecast_results.csv"}
+    files = {"classification": "classification_benchmark_metrics.csv", "optimization": "model_optimization/model_leaderboard.csv", "clusters": "cluster_summary.csv", "association-rules": "association_rules.csv", "forecast": "forecast_results.csv"}
     if name not in files: raise HTTPException(404, "Unknown analytics resource.")
     path = OUT / files[name]
     if not path.exists(): raise HTTPException(404, "The requested analytics output is unavailable.")

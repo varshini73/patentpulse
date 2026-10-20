@@ -1,0 +1,14 @@
+feature,source,availability,leakage_risk,production_permitted
+pages,warehouse/raw workbook,A - document/external confirmation,low,True
+claims,warehouse/raw workbook,A - document/external confirmation,low,True
+inventors,warehouse/raw workbook,A - document/external confirmation,low,True
+npl_count,warehouse/raw workbook,A - document/external confirmation,low,True
+ipc_count,warehouse/raw workbook,A - document/external confirmation,low,True
+pub_year,warehouse/raw workbook,A - document/external confirmation,low,True
+country_code,warehouse/raw workbook,A - document/external confirmation,low,True
+kind_code,warehouse/raw workbook,A - document/external confirmation,low,True
+ipc_subclass,warehouse/raw workbook,A - document/external confirmation,low,True
+title/abstract text,raw workbook / PDF extraction,A - document,low,True
+backward_citations,workbook,D - timing uncertain,possible later updates,False
+family_size,workbook,D - timing uncertain,possible later updates,False
+cited_3yr / is_highly_cited,workbook / warehouse,C - outcome only,direct target,False

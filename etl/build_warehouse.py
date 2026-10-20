@@ -1,3 +1,4 @@
+"""PatentPulse ETL: S1 File (xlsx) -> SQLite star schema."""
 import sqlite3
 from pathlib import Path
 

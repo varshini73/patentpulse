@@ -1,0 +1,37 @@
+{
+  "features": [
+    "pages",
+    "claims",
+    "inventors",
+    "npl_count",
+    "ipc_count",
+    "pub_year",
+    "country_code",
+    "kind_code",
+    "ipc_subclass"
+  ],
+  "numeric_features": [
+    "pages",
+    "claims",
+    "inventors",
+    "npl_count",
+    "ipc_count",
+    "pub_year"
+  ],
+  "categorical_features": [
+    "country_code",
+    "kind_code",
+    "ipc_subclass"
+  ],
+  "selected_model": "deployable_hgb_v2",
+  "model_version": "document_model_v2",
+  "split": {
+    "test_size": 0.2,
+    "random_state": 2026,
+    "stratified": true
+  },
+  "threshold": 0.5,
+  "calibration": "raw estimator probability; Brier and log loss reported, no calibration selected without CV benefit",
+  "timing_note": "family_size and backward_citations excluded because prediction-time availability is unresolved",
+  "track": "B - deployable document model"
+}
